@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { FieldType, TableData } from '$lib/table-data';
+	import { TableFilters, type NumericOperator } from '$lib/table-filters.svelte';
+
+	const filters = new TableFilters();
 
 	let table: TableData | null = $state(null);
 
@@ -8,6 +11,7 @@
 		const res = await fetch('/api/table');
 		const data = await res.json();
 		table = data.table;
+		filters.setRows(table?.rows ?? []);
 	});
 
 	function formatCell(value: unknown, type: FieldType): string {
@@ -16,6 +20,14 @@
 		return String(value);
 	}
 </script>
+
+<svelte:window
+	onclick={(event) => {
+		if (filters.openFilter && !(event.target as HTMLElement).closest('.filter-cell')) {
+			filters.closeMenu();
+		}
+	}}
+/>
 
 <svelte:head>
 	<title>Table rendering exercise</title>
@@ -42,12 +54,138 @@
 					<thead>
 						<tr>
 							{#each table.fields as field (field.id)}
-								<th scope="col">{field.label}</th>
+								{@const filter = filters.columnFilters[field.id]}
+								{#if filter}
+									<th scope="col" class="filter-cell">
+										<button
+											type="button"
+											class="column-trigger"
+											class:is-active={filters.isFilterActive(field.id, filter)}
+											aria-haspopup="listbox"
+											aria-expanded={filters.openFilter === field.id}
+											onclick={() => filters.toggleFilter(field.id, filter)}
+										>
+											<span>{field.label}</span>
+											{#if filters.sort?.column === field.id}
+												<span class="sort-indicator" aria-hidden="true">
+													{filters.sort.direction === 'asc' ? '↑' : '↓'}
+												</span>
+											{/if}
+											<svg
+												class="chevron"
+												width="12"
+												height="12"
+												viewBox="0 0 12 12"
+												aria-hidden="true"
+											>
+												<path
+													d="M2 4l4 4 4-4"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="1.5"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+												/>
+											</svg>
+										</button>
+										{#if filters.openFilter === field.id}
+											<div class="filter-menu">
+												{#if filter.kind === 'select'}
+													<ul class="filter-options" role="listbox" aria-label="Filter by {field.label}">
+														{#each filter.options as option (option.value)}
+															<li>
+																<button
+																	type="button"
+																	role="option"
+																	aria-selected={filters.selectValue(field.id, filter) === option.value}
+																	class:selected={filters.selectValue(field.id, filter) === option.value}
+																	onclick={() => filters.selectFilter(field.id, option.value)}
+																>
+																	{option.label}
+																</button>
+															</li>
+														{/each}
+													</ul>
+												{:else}
+													{@const value = filters.numericDraft ?? filters.numericValue(field.id, filter)}
+													<div class="numeric-filter">
+														<label class="numeric-field">
+															<span class="numeric-label">Condition</span>
+															<select
+																value={value.operator}
+																onchange={(e) =>
+																	filters.setNumericDraft({
+																		operator: e.currentTarget.value as NumericOperator
+																	})}
+															>
+																{#each filters.numericOperators as op (op.value)}
+																	<option value={op.value}>{op.label}</option>
+																{/each}
+															</select>
+														</label>
+														<label class="numeric-field">
+															<span class="numeric-label">Amount</span>
+															<input
+																type="number"
+																inputmode="decimal"
+																placeholder="Enter amount"
+																value={value.amount ?? ''}
+																oninput={(e) =>
+																	filters.setNumericDraft({
+																		amount: e.currentTarget.value === '' ? null : Number(e.currentTarget.value)
+																	})}
+															/>
+														</label>
+														<div class="sort-options">
+															<span class="numeric-label">Sort</span>
+															<div class="sort-buttons">
+																<button
+																	type="button"
+																	class="sort-button"
+																	class:selected={filters.sort?.column === field.id && filters.sort.direction === 'asc'}
+																	onclick={() => filters.setSort(field.id, 'asc')}
+																>
+																	Ascending ↑
+																</button>
+																<button
+																	type="button"
+																	class="sort-button"
+																	class:selected={filters.sort?.column === field.id && filters.sort.direction === 'desc'}
+																	onclick={() => filters.setSort(field.id, 'desc')}
+																>
+																	Descending ↓
+																</button>
+															</div>
+														</div>
+														<div class="numeric-actions">
+															<button
+																type="button"
+																class="link-button"
+																onclick={() => filters.clearFilter(field.id, filter)}
+															>
+																Clear
+															</button>
+															<button
+																type="button"
+																class="primary-button"
+																onclick={() => filters.applyNumeric(field.id)}
+															>
+																Done
+															</button>
+														</div>
+													</div>
+												{/if}
+											</div>
+										{/if}
+									</th>
+								{:else}
+									<th scope="col">{field.label}</th>
+								{/if}
 							{/each}
 						</tr>
 					</thead>
 					<tbody>
-						{#each table.rows as row (row.id)}
+						{#each filters.displayRows as row (row.id)}
 							<tr>
 								{#each table.fields as field (field.id)}
 									<td>{formatCell(row[field.id], field.type)}</td>
@@ -141,7 +279,211 @@
 		border-bottom: 1px solid #d7dde7;
 		padding: 16px 20px;
 	}
-	
+
+	.filter-cell {
+		position: relative;
+	}
+
+	.column-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		margin: -4px -8px;
+		border: 1px solid transparent;
+		border-radius: 6px;
+		padding: 4px 8px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		font-weight: 700;
+		cursor: pointer;
+		transition:
+			background 0.15s ease,
+			border-color 0.15s ease;
+	}
+
+	.column-trigger:hover {
+		background: #e6ebf3;
+	}
+
+	.column-trigger.is-active {
+		border-color: #2563eb;
+		background: #e8f0ff;
+		color: #1d4ed8;
+	}
+
+	.chevron {
+		transition: transform 0.15s ease;
+	}
+
+	.column-trigger[aria-expanded='true'] .chevron {
+		transform: rotate(180deg);
+	}
+
+	.filter-menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 0;
+		z-index: 10;
+		min-width: 160px;
+		margin: 0;
+		padding: 4px;
+		border: 1px solid #d7dde7;
+		border-radius: 8px;
+		background: #ffffff;
+		box-shadow: 0 8px 24px rgba(23, 32, 51, 0.14);
+	}
+
+	.filter-options {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.filter-options button {
+		display: block;
+		width: 100%;
+		border: none;
+		border-radius: 5px;
+		padding: 8px 10px;
+		background: transparent;
+		color: #2b3648;
+		font: inherit;
+		font-weight: 500;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.filter-options button:hover {
+		background: #f0f3f8;
+	}
+
+	.filter-options button.selected {
+		background: #e8f0ff;
+		color: #1d4ed8;
+		font-weight: 600;
+	}
+
+	.numeric-filter {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 8px;
+	}
+
+	.numeric-field {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.numeric-label {
+		color: #5a6b85;
+		font-size: 0.72rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+	}
+
+	.numeric-field select,
+	.numeric-field input {
+		width: 100%;
+		box-sizing: border-box;
+		border: 1px solid #d7dde7;
+		border-radius: 6px;
+		padding: 7px 8px;
+		background: #ffffff;
+		color: #2b3648;
+		font: inherit;
+		font-weight: 500;
+	}
+
+	.numeric-field select:focus,
+	.numeric-field input:focus {
+		outline: none;
+		border-color: #2563eb;
+		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+	}
+
+	.numeric-actions {
+		display: flex;
+		justify-content: space-between;
+		gap: 8px;
+		margin-top: 2px;
+	}
+
+	.sort-options {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		border-top: 1px solid #eaeef4;
+		padding-top: 10px;
+	}
+
+	.sort-buttons {
+		display: flex;
+		gap: 6px;
+	}
+
+	.sort-button {
+		flex: 1;
+		border: 1px solid #d7dde7;
+		border-radius: 6px;
+		padding: 7px 8px;
+		background: #ffffff;
+		color: #2b3648;
+		font: inherit;
+		font-weight: 500;
+		text-align: center;
+		cursor: pointer;
+	}
+
+	.sort-button:hover {
+		background: #f0f3f8;
+	}
+
+	.sort-button.selected {
+		border-color: #2563eb;
+		background: #e8f0ff;
+		color: #1d4ed8;
+		font-weight: 600;
+	}
+
+	.sort-indicator {
+		color: #1d4ed8;
+		font-weight: 700;
+	}
+
+	.link-button {
+		border: none;
+		border-radius: 6px;
+		padding: 7px 10px;
+		background: transparent;
+		color: #476181;
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.link-button:hover {
+		background: #f0f3f8;
+	}
+
+	.primary-button {
+		border: none;
+		border-radius: 6px;
+		padding: 7px 14px;
+		background: #2563eb;
+		color: #ffffff;
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.primary-button:hover {
+		background: #1d4ed8;
+	}
+
 	table {
 		width: 100%;
 		border-collapse: collapse;
