@@ -1,3 +1,22 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import type { FieldType, TableData } from '$lib/table-data';
+
+	let table: TableData | null = $state(null);
+
+	onMount(async () => {
+		const res = await fetch('/api/table');
+		const data = await res.json();
+		table = data.table;
+	});
+
+	function formatCell(value: unknown, type: FieldType): string {
+		if (type === 'Boolean') return value ? 'Yes' : 'No';
+		if (type === 'Date') return new Date(value as string).toLocaleDateString('en-GB');
+		return String(value);
+	}
+</script>
+
 <svelte:head>
 	<title>Table rendering exercise</title>
 </svelte:head>
@@ -16,9 +35,28 @@
 		<div class="workspace-header">
 			<h2 id="workspace-title">Table workspace</h2>
 		</div>
-
-		<div class="placeholder">
-			<p>Render the table here.</p>
+		
+		<div>
+			{#if table}
+				<table>
+					<thead>
+						<tr>
+							{#each table.fields as field (field.id)}
+								<th scope="col">{field.label}</th>
+							{/each}
+						</tr>
+					</thead>
+					<tbody>
+						{#each table.rows as row (row.id)}
+							<tr>
+								{#each table.fields as field (field.id)}
+									<td>{formatCell(row[field.id], field.type)}</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
 		</div>
 	</section>
 </main>
@@ -103,31 +141,30 @@
 		border-bottom: 1px solid #d7dde7;
 		padding: 16px 20px;
 	}
-
-	.workspace-header p {
-		margin: 0;
-		color: #637083;
-		font-size: 0.92rem;
+	
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.95rem;
 	}
 
-	.placeholder {
-		display: grid;
-		min-height: 280px;
-		place-items: center;
-		padding: 24px;
-		color: #637083;
-		background:
-			linear-gradient(#eef2f7 1px, transparent 1px),
-			linear-gradient(90deg, #eef2f7 1px, transparent 1px);
-		background-size: 48px 48px;
+	thead th {
+		border-bottom: 2px solid #d7dde7;
+		padding: 12px 20px;
+		background: #f0f3f8;
+		color: #33425b;
+		font-weight: 700;
+		text-align: left;
 	}
 
-	.placeholder p {
-		margin: 0;
-		border: 1px dashed #aeb8c8;
-		border-radius: 6px;
-		padding: 12px 16px;
-		background: #ffffff;
+	tbody td {
+		border-bottom: 1px solid #eaeef4;
+		padding: 12px 20px;
+		color: #2b3648;
+	}
+
+	tbody tr:nth-child(even) {
+		background: #fafbfd;
 	}
 
 	@media (max-width: 640px) {
